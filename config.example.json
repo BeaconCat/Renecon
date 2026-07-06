@@ -1,0 +1,37 @@
+{
+  "napcat": {
+    "url": "ws://127.0.0.1:3001",
+    "accessToken": ""
+  },
+  "groups": [
+    { "id": "123456789", "name": "示例交流群", "enabled": true }
+  ],
+  "llm": {
+    "provider": "openai",
+    "temperature": 0.2,
+    "vision": { "enabled": false, "maxImages": 6 },
+    "openai": { "baseUrl": "https://api.openai.com/v1", "apiKey": "", "model": "gpt-4o-mini" },
+    "claude": { "baseUrl": "https://api.anthropic.com", "apiKey": "", "model": "claude-sonnet-5" },
+    "mimo": { "baseUrl": "https://api.xiaomimimo.com/v1", "apiKey": "", "model": "mimo-v2.5-pro", "thinking": true }
+  },
+  "feishu": {
+    "webhookUrl": "",
+    "secret": ""
+  },
+  "pipeline": {
+    "enabled": false,
+    "intervalMinutes": 15,
+    "mode": "structured",
+    "maxRetries": 3,
+    "cardTitle": "产品反馈汇总（{count} 条）",
+    "prompt": "从群聊消息中找出关于目标产品的用户反馈、问题、建议或 bug。",
+    "schema": [
+      { "key": "product", "label": "相关产品名", "type": "string", "required": true, "enum": [] },
+      { "key": "category", "label": "分类", "type": "enum", "required": true, "enum": ["bug", "feedback", "suggestion", "question", "other"] },
+      { "key": "summary", "label": "一句话概括", "type": "string", "required": true, "enum": [] },
+      { "key": "quote", "label": "原始消息摘录", "type": "string", "required": true, "enum": [] },
+      { "key": "sender", "label": "发言人", "type": "string", "required": false, "enum": [] },
+      { "key": "severity", "label": "严重度", "type": "enum", "required": false, "enum": ["low", "medium", "high"] }
+    ]
+  }
+}

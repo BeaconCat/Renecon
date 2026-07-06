@@ -1,0 +1,23 @@
+{
+  "name": "renecon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Renecon - NapCatQQ group message reconnaissance & feedback digest bot",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --parallel -r dev",
+    "dev:backend": "pnpm --filter @renecon/backend dev",
+    "dev:frontend": "pnpm --filter @renecon/frontend dev",
+    "build": "pnpm --filter @renecon/frontend build",
+    "start": "pnpm --filter @renecon/backend start"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  }
+}

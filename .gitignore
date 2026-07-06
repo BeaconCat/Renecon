@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Runtime data (config with secrets, message DB, downloaded images)
+backend/data/
+data/*.db
+data/*.db-*
+
+# NapCat binary distribution (not part of this project)
+NapCat.Shell.Windows.OneKey/
+
+# Logs & env
+*.log
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
