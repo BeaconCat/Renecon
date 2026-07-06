@@ -6,7 +6,11 @@
  * markdown) -> format -> Feishu push -> persist a digest row.
  */
 
-import { getMessagesInWindow, insertDigest } from '../db/index.js';
+import crypto from 'node:crypto';
+import {
+  getMessagesInWindow, insertDigest,
+  findTopic, upsertTopic, pruneTopics,
+} from '../db/index.js';
 import { runStructured, runMarkdown } from '../llm/index.js';
 import { fetchImageAsBase64 } from '../llm/images.js';
 import { readAsBase64 } from '../media/store.js';
@@ -18,6 +22,50 @@ const log = createLogger('pipeline');
 /** Render the configured card title, substituting {count}. */
 function renderTitle(template, count) {
   return String(template || '汇总').replace(/\{count\}/g, count);
+}
+
+// Extra fields forced into the schema when topic de-dup is on. The LLM must
+// attribute each item to its source group and give a stable topic key.
+const DEDUP_EXTRA_FIELDS = [
+  { key: 'group', label: '来源群名（从消息前缀 #群名 原样复制）', type: 'string', required: true, enum: [] },
+  { key: 'topic', label: '话题稳定标识：对同一件事必须给相同的英文短横线 key，如 maixcam-install-runtime-fail', type: 'string', required: true, enum: [] },
+];
+
+function slug(s) {
+  return String(s || '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w一-龥-]/g, '')
+    .slice(0, 60);
+}
+
+/** Stable signature of an item's user-schema field values (excludes group/topic). */
+function itemSignature(item, fields) {
+  const keys = (fields && fields.length ? fields : Object.keys(item))
+    .map((f) => (typeof f === 'string' ? f : f.key))
+    .filter((k) => k !== 'group' && k !== 'topic');
+  const payload = keys.map((k) => `${k}=${item[k] ?? ''}`).join('|');
+  return crypto.createHash('sha1').update(payload).digest('hex').slice(0, 16);
+}
+
+/** One-line compact alert: [product] [Severity] [Category] (群名|群号):summary */
+function compactLine(item, displayGroup) {
+  const cap = (v) => (v ? String(v).charAt(0).toUpperCase() + String(v).slice(1) : v);
+  const tag = (v) => (v ? `[${v}] ` : '');
+  const head = `${tag(item.product)}${tag(cap(item.severity))}${tag(cap(item.category))}`.trim();
+  const loc = displayGroup ? `(${displayGroup})` : '';
+  const summary = item.summary || item.quote || '';
+  return `${head} ${loc}:${summary}`.trim();
+}
+
+/** Resolve an item's group field to a { id, display } using configured groups. */
+function resolveGroup(groupField, groups) {
+  const raw = String(groupField || '').trim();
+  const g = groups.find((x) => x.name === raw || String(x.id) === raw)
+    || groups.find((x) => raw && (raw.includes(x.name) || (x.name && x.name.includes(raw))));
+  if (g) return { id: String(g.id), display: `${g.name}|${g.id}` };
+  return { id: raw || 'unknown', display: raw };
 }
 
 /** Render one archived row as a transcript line. */
@@ -53,6 +101,47 @@ export function itemsToMarkdown(items, fields) {
       return lines.join('\n');
     })
     .join('\n\n');
+}
+
+/**
+ * Classify extracted items against stored per-group topics.
+ *   - new topic      -> full rendering
+ *   - existing topic, content changed -> one-line compact alert
+ *   - existing topic, unchanged       -> silenced
+ * Updates the topic store (bump/insert + prune to keepTopics).
+ * @returns {{ fresh: Array, updated: Array, body: string }}
+ */
+export function applyDedup(items, cfg) {
+  const keep = Math.max(1, Number(cfg.pipeline.dedup?.keepTopics) || 5);
+  const now = Math.floor(Date.now() / 1000);
+  const fresh = [];
+  const updated = [];
+
+  for (const it of items) {
+    const { id: groupId, display } = resolveGroup(it.group, cfg.groups);
+    const topicKey = slug(it.topic || it.summary || it.product || '');
+    if (!topicKey) { fresh.push({ it, display }); continue; }
+    const signature = itemSignature(it, cfg.pipeline.schema);
+    const prev = findTopic(groupId, topicKey);
+
+    if (!prev) {
+      fresh.push({ it, display });
+    } else if (prev.signature !== signature) {
+      updated.push({ it, display });
+    } // else: unchanged -> silent
+
+    upsertTopic({ groupId, topicKey, signature, summary: it.summary || '', ts: now });
+    pruneTopics(groupId, keep);
+  }
+
+  const parts = [];
+  if (fresh.length) {
+    parts.push(itemsToMarkdown(fresh.map((f) => f.it), cfg.pipeline.schema));
+  }
+  if (updated.length) {
+    parts.push(`**话题更新（${updated.length}）**\n${updated.map((u) => compactLine(u.it, u.display)).join('\n')}`);
+  }
+  return { fresh, updated, body: parts.join('\n\n---\n\n') };
 }
 
 /**
@@ -112,19 +201,32 @@ export async function runPipeline(cfg, windowStart, windowEnd, opts = {}) {
     let title;
 
     if (cfg.pipeline.mode === 'structured') {
+      const dedup = cfg.pipeline.dedup?.enabled;
       const { items } = await runStructured(cfg.llm, {
         prompt: cfg.pipeline.prompt,
         transcript,
         maxRetries: cfg.pipeline.maxRetries,
         images,
         fields: cfg.pipeline.schema,
+        extraFields: dedup ? DEDUP_EXTRA_FIELDS : undefined,
       });
       resultText = JSON.stringify(items, null, 2);
-      cardBody = itemsToMarkdown(items, cfg.pipeline.schema);
-      title = renderTitle(cfg.pipeline.cardTitle, items.length);
-      if (!items.length) {
-        insertDigest({ ...window, status: 'empty', result: resultText, pushed: 0, error: null });
-        return { ...window, status: 'empty', items };
+
+      if (dedup) {
+        const built = applyDedup(items, cfg);
+        if (!built.fresh.length && !built.updated.length) {
+          insertDigest({ ...window, status: 'empty', result: resultText, pushed: 0, error: null });
+          return { ...window, status: 'empty', items };
+        }
+        cardBody = built.body;
+        title = renderTitle(cfg.pipeline.cardTitle, built.fresh.length + built.updated.length);
+      } else {
+        cardBody = itemsToMarkdown(items, cfg.pipeline.schema);
+        title = renderTitle(cfg.pipeline.cardTitle, items.length);
+        if (!items.length) {
+          insertDigest({ ...window, status: 'empty', result: resultText, pushed: 0, error: null });
+          return { ...window, status: 'empty', items };
+        }
       }
     } else {
       const md = await runMarkdown(cfg.llm, { prompt: cfg.pipeline.prompt, transcript, images });

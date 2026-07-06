@@ -59,6 +59,19 @@ export function initDb() {
       key   TEXT PRIMARY KEY,
       value TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS group_topics (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id   TEXT NOT NULL,
+      topic_key  TEXT NOT NULL,
+      signature  TEXT,
+      summary    TEXT,
+      hit_count  INTEGER NOT NULL DEFAULT 1,
+      first_seen INTEGER NOT NULL,
+      last_seen  INTEGER NOT NULL,
+      UNIQUE (group_id, topic_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_topics_group ON group_topics (group_id, last_seen);
   `);
   migrate();
   log.info('Database ready at', DB_PATH);
@@ -219,6 +232,60 @@ export function setState(key, value) {
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     )
     .run(key, String(value));
+}
+
+/* ------------------------------------------------------------ group_topics */
+
+/** Look up a stored topic for a group, or null. */
+export function findTopic(groupId, topicKey) {
+  return getDb()
+    .prepare('SELECT * FROM group_topics WHERE group_id = ? AND topic_key = ?')
+    .get(String(groupId), topicKey) || null;
+}
+
+/**
+ * Insert or update a topic. Bumps hit_count and last_seen on repeat.
+ * @param {object} t { groupId, topicKey, signature, summary, ts }
+ */
+export function upsertTopic(t) {
+  getDb()
+    .prepare(
+      `INSERT INTO group_topics (group_id, topic_key, signature, summary, hit_count, first_seen, last_seen)
+       VALUES (@groupId, @topicKey, @signature, @summary, 1, @ts, @ts)
+       ON CONFLICT(group_id, topic_key) DO UPDATE SET
+         signature = excluded.signature,
+         summary   = excluded.summary,
+         hit_count = hit_count + 1,
+         last_seen = excluded.last_seen`,
+    )
+    .run({
+      groupId: String(t.groupId),
+      topicKey: t.topicKey,
+      signature: t.signature ?? null,
+      summary: t.summary ?? null,
+      ts: t.ts,
+    });
+}
+
+/** Keep only the `keep` most-recent topics per group; delete the rest. */
+export function pruneTopics(groupId, keep) {
+  getDb()
+    .prepare(
+      `DELETE FROM group_topics
+       WHERE group_id = ?
+         AND id NOT IN (
+           SELECT id FROM group_topics WHERE group_id = ?
+           ORDER BY last_seen DESC LIMIT ?
+         )`,
+    )
+    .run(String(groupId), String(groupId), keep);
+}
+
+/** Recent topics for a group (for inspection). */
+export function getGroupTopics(groupId, limit = 5) {
+  return getDb()
+    .prepare('SELECT * FROM group_topics WHERE group_id = ? ORDER BY last_seen DESC LIMIT ?')
+    .all(String(groupId), limit);
 }
 
 export function queryDigests({ limit = 50, offset = 0 } = {}) {

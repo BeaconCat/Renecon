@@ -88,8 +88,11 @@ function extractJson(text) {
  *
  * @returns {Promise<{items: Array}>}
  */
-export async function runStructured(llmCfg, { prompt, transcript, maxRetries = 3, images, fields }) {
-  const activeFields = Array.isArray(fields) && fields.length ? fields : DEFAULT_FIELDS;
+export async function runStructured(llmCfg, { prompt, transcript, maxRetries = 3, images, fields, extraFields }) {
+  const base = Array.isArray(fields) && fields.length ? fields : DEFAULT_FIELDS;
+  const activeFields = Array.isArray(extraFields) && extraFields.length
+    ? [...base, ...extraFields]
+    : base;
   const resultSchema = buildResultSchema(activeFields);
   const shapeText = buildShapeText(activeFields);
 

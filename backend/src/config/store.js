@@ -66,6 +66,13 @@ function defaultConfig() {
       // Feishu card title. {count} = item count (structured) / message count
       // (markdown).
       cardTitle: '产品反馈汇总（{count} 条）',
+      // Topic de-duplication (structured mode). Keeps the last `keepTopics`
+      // distinct topics per group; a repeated topic with no change is silenced,
+      // a repeated topic with an update becomes a one-line compact alert.
+      dedup: {
+        enabled: false,
+        keepTopics: 5,
+      },
       // The task instruction fed to the LLM alongside the raw messages.
       prompt:
         '你是产品反馈分析助手。请从以下群聊消息中，找出所有关于 Sipeed 旗下产品'

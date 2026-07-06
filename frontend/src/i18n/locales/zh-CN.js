@@ -108,6 +108,9 @@ export default {
     fieldType: '类型',
     fieldEnum: '候选值（enum）',
     fieldRequired: '必填',
+    dedup: '话题去重',
+    dedupDesc: '每群保留最近若干个不同话题。已提醒过的话题：无变化则静默，有更新则压成一行提醒（[产品] [严重度] [分类] (群名|群号):概括）。开启后模型会额外输出来源群与话题标识。',
+    keepTopics: '每群保留话题数',
   },
   messages: {
     title: '消息池',

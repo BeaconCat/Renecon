@@ -18,6 +18,7 @@ const form = reactive({
   cardTitle: '',
   prompt: '',
   schema: [],
+  dedup: { enabled: false, keepTopics: 5 },
 });
 const runMinutes = ref(15);
 const running = ref(false);
@@ -61,6 +62,7 @@ onMounted(async () => {
   if (!cfg.loaded) await cfg.load();
   Object.assign(form, JSON.parse(JSON.stringify(cfg.config.pipeline)));
   if (!Array.isArray(form.schema)) form.schema = [];
+  if (!form.dedup) form.dedup = { enabled: false, keepTopics: 5 };
   runMinutes.value = form.intervalMinutes;
 });
 </script>
@@ -165,6 +167,23 @@ onMounted(async () => {
         </tbody>
       </table>
       <p v-else class="dim" style="font-size: 13px">{{ $t('common.empty') }}</p>
+    </div>
+
+    <div v-if="form.mode === 'structured'" class="schema" style="margin-top: 14px">
+      <div class="schema__head" style="margin-bottom: 0">
+        <div>
+          <span class="schema__title">{{ $t('pipeline.dedup') }}</span>
+          <p class="schema__desc">{{ $t('pipeline.dedupDesc') }}</p>
+        </div>
+        <label class="switch">
+          <input type="checkbox" v-model="form.dedup.enabled" />
+          <span class="switch__track" />
+        </label>
+      </div>
+      <div v-if="form.dedup.enabled" class="field" style="max-width: 220px; margin-top: 14px">
+        <label class="field__label">{{ $t('pipeline.keepTopics') }}</label>
+        <input v-model.number="form.dedup.keepTopics" type="number" min="1" max="50" class="input" />
+      </div>
     </div>
 
     <div class="actions">
