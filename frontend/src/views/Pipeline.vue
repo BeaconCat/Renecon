@@ -103,7 +103,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div class="field">
+    <div v-if="form.mode !== 'compact'" class="field">
       <label class="field__label">{{ $t('pipeline.cardTitle') }}</label>
       <input v-model="form.cardTitle" class="input" placeholder="产品反馈汇总（{count} 条）" />
       <p class="hint">{{ $t('pipeline.cardTitleDesc') }}</p>

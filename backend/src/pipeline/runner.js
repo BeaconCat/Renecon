@@ -309,9 +309,9 @@ export async function runPipeline(cfg, windowStart, windowEnd, opts = {}) {
 
     let pushed = 0;
     if (push && cfg.feishu.webhookUrl) {
-      // Compact mode: plain text message; everything else: interactive card.
+      // Compact mode: plain text message, no card title; else: interactive card.
       if (compact) {
-        await sendText(cfg.feishu, `${title}\n${cardBody}`);
+        await sendText(cfg.feishu, cardBody);
       } else {
         await sendMarkdownCard(cfg.feishu, title, cardBody);
       }
