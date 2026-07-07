@@ -61,7 +61,7 @@ function defaultConfig() {
     pipeline: {
       enabled: false,
       intervalMinutes: 15,
-      mode: 'structured', // 'structured' | 'markdown'
+      mode: 'structured', // 'structured' | 'markdown' | 'compact'
       maxRetries: 3,
       // Feishu card title. {count} = item count (structured) / message count
       // (markdown).
@@ -72,11 +72,6 @@ function defaultConfig() {
       dedup: {
         enabled: false,
         keepTopics: 5,
-      },
-      // Compact mode (structured): push a plain text message (not a card), one
-      // line per item — [product] [Severity] [Category] (sender@群名|群号):summary.
-      compact: {
-        enabled: false,
       },
       // Rolling-context de-dup: feed the previous `runs` windows' raw messages
       // to the LLM as read-only history so it skips already-reported feedback.

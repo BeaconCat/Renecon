@@ -119,6 +119,25 @@ a { color: var(--glow-blue); text-decoration: none; }
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--glow-blue) 22%, transparent);
 }
 
+/* Custom-styled dropdown: strip native chrome, draw our own chevron. */
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='12'%20height='12'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%238a929e'%20stroke-width='2.5'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%209l6%206%206-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+}
+.select:hover { border-color: var(--border-strong); }
+.select:focus {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='12'%20height='12'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%234c8bf5'%20stroke-width='2.5'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%209l6%206%206-6'/%3E%3C/svg%3E");
+}
+.select option { background: var(--bg-elev); color: var(--text); padding: 8px; }
+.select.input--sm { padding-right: 28px; background-position: right 8px center; }
+
 .btn {
   display: inline-flex;
   align-items: center;

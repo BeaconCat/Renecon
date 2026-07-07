@@ -26,18 +26,19 @@ function renderTitle(template, count) {
 
 // Attribution fields injected into the schema so the LLM tags each item with
 // its source. `group`/`sender` power compact one-line alerts; `topic` powers
-// the per-group topic de-dup store.
-const GROUP_FIELD = { key: 'group', label: '来源群名（从消息前缀 #群名 原样复制）', type: 'string', required: true, enum: [] };
-const SENDER_FIELD = { key: 'sender', label: '发言人昵称（从消息中原样复制）', type: 'string', required: false, enum: [] };
+// the per-group topic de-dup store. group/sender are COPIED verbatim from the
+// bracketed transcript prefix (real WS data), never inferred.
+const GROUP_FIELD = { key: 'group', label: '来源群标识：原样复制该条消息行首方括号内的「群名|群号」，如 MaixPy交流群|862340358', type: 'string', required: true, enum: [] };
+const SENDER_FIELD = { key: 'sender', label: '发言人标识：原样复制该条消息中发言人的「昵称(QQ号)」，如 张三(10001)', type: 'string', required: false, enum: [] };
 const TOPIC_FIELD = { key: 'topic', label: '话题稳定标识：对同一件事必须给相同的英文短横线 key，如 maixcam-install-runtime-fail', type: 'string', required: true, enum: [] };
 
 /** Merge attribution fields needed by dedup/compact, skipping keys already in the schema. */
 function buildExtraFields({ dedup, compact, schema }) {
-  const have = new Set((schema || []).map((f) => f.key));
   const out = [];
+  const have = new Set((schema || []).map((f) => f.key));
   const add = (f) => { if (!have.has(f.key) && !out.some((x) => x.key === f.key)) out.push(f); };
-  if (dedup) { add(GROUP_FIELD); add(TOPIC_FIELD); }
   if (compact) { add(GROUP_FIELD); add(SENDER_FIELD); }
+  if (dedup) { add(GROUP_FIELD); add(TOPIC_FIELD); }
   return out;
 }
 
@@ -81,22 +82,30 @@ export function itemsToCompact(items, cfg) {
     .join('\n');
 }
 
-/** Resolve an item's group field to a { id, display } using configured groups. */
+/** Resolve an item's group field to a { id, display } using configured groups.
+ * The field is normally "群名|群号" copied from the transcript; the numeric id
+ * after the last '|' is the reliable key (real WS group_id). */
 function resolveGroup(groupField, groups) {
   const raw = String(groupField || '').trim();
-  const g = groups.find((x) => x.name === raw || String(x.id) === raw)
-    || groups.find((x) => raw && (raw.includes(x.name) || (x.name && x.name.includes(raw))));
+  const idPart = raw.includes('|') ? raw.split('|').pop().trim() : '';
+  const g = (idPart && groups.find((x) => String(x.id) === idPart))
+    || groups.find((x) => x.name === raw || String(x.id) === raw)
+    || groups.find((x) => raw && x.name && (raw.includes(x.name) || x.name.includes(raw)));
   if (g) return { id: String(g.id), display: `${g.name}|${g.id}` };
-  return { id: raw || 'unknown', display: raw };
+  return { id: idPart || raw || 'unknown', display: raw };
 }
 
-/** Render one archived row as a transcript line. */
+/** Render one archived row as a transcript line. The group and sender carry the
+ * real WS ids ("[群名|群号]" and "昵称(QQ号)") so the LLM can copy them verbatim
+ * for attribution instead of guessing. */
 function formatLine(m) {
   const t = new Date(m.msg_time * 1000);
   const hh = String(t.getHours()).padStart(2, '0');
   const mm = String(t.getMinutes()).padStart(2, '0');
-  const who = m.sender_name || m.sender_id || '匿名';
-  const grp = m.group_name ? `#${m.group_name}` : `#${m.group_id}`;
+  const grp = `[${m.group_name || m.group_id}|${m.group_id}]`;
+  const who = m.sender_name
+    ? `${m.sender_name}(${m.sender_id ?? ''})`
+    : (m.sender_id ? String(m.sender_id) : '匿名');
   return `[${hh}:${mm}] ${grp} ${who}: ${m.content}`;
 }
 
@@ -235,14 +244,22 @@ export async function runPipeline(cfg, windowStart, windowEnd, opts = {}) {
     }
   }
 
-  const compact = cfg.pipeline.compact?.enabled;
+  // 'compact' is a structured extraction rendered as one-line plain-text alerts.
+  const mode = cfg.pipeline.mode;
+  const compact = mode === 'compact';
 
   try {
     let resultText;
     let cardBody;
     let title;
 
-    if (cfg.pipeline.mode === 'structured') {
+    if (mode === 'markdown') {
+      const md = await runMarkdown(cfg.llm, { prompt: cfg.pipeline.prompt, transcript, history, images });
+      resultText = md;
+      cardBody = md;
+      title = renderTitle(cfg.pipeline.cardTitle, messages.length);
+    } else {
+      // structured (card) or compact (one-liners) — both extract structured items.
       const dedup = cfg.pipeline.dedup?.enabled;
       const { items } = await runStructured(cfg.llm, {
         prompt: cfg.pipeline.prompt,
@@ -271,17 +288,12 @@ export async function runPipeline(cfg, windowStart, windowEnd, opts = {}) {
         cardBody = compact ? itemsToCompact(items, cfg) : itemsToMarkdown(items, cfg.pipeline.schema);
         title = renderTitle(cfg.pipeline.cardTitle, items.length);
       }
-    } else {
-      const md = await runMarkdown(cfg.llm, { prompt: cfg.pipeline.prompt, transcript, history, images });
-      resultText = md;
-      cardBody = md;
-      title = renderTitle(cfg.pipeline.cardTitle, messages.length);
     }
 
     let pushed = 0;
     if (push && cfg.feishu.webhookUrl) {
-      // Compact mode (structured only): plain text message instead of a card.
-      if (compact && cfg.pipeline.mode === 'structured') {
+      // Compact mode: plain text message; everything else: interactive card.
+      if (compact) {
         await sendText(cfg.feishu, `${title}\n${cardBody}`);
       } else {
         await sendMarkdownCard(cfg.feishu, title, cardBody);

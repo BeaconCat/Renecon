@@ -19,7 +19,6 @@ const form = reactive({
   prompt: '',
   schema: [],
   dedup: { enabled: false, keepTopics: 5 },
-  compact: { enabled: false },
   rollingContext: { enabled: false, runs: 4 },
 });
 const runMinutes = ref(15);
@@ -65,7 +64,6 @@ onMounted(async () => {
   Object.assign(form, JSON.parse(JSON.stringify(cfg.config.pipeline)));
   if (!Array.isArray(form.schema)) form.schema = [];
   if (!form.dedup) form.dedup = { enabled: false, keepTopics: 5 };
-  if (!form.compact) form.compact = { enabled: false };
   if (!form.rollingContext) form.rollingContext = { enabled: false, runs: 4 };
   runMinutes.value = form.intervalMinutes;
 });
@@ -95,6 +93,7 @@ onMounted(async () => {
         <label class="field__label">{{ $t('pipeline.mode') }}</label>
         <select v-model="form.mode" class="select">
           <option value="structured">{{ $t('pipeline.modeStructured') }}</option>
+          <option value="compact">{{ $t('pipeline.modeCompact') }}</option>
           <option value="markdown">{{ $t('pipeline.modeMarkdown') }}</option>
         </select>
       </div>
@@ -115,7 +114,7 @@ onMounted(async () => {
       <textarea v-model="form.prompt" class="textarea" rows="6" />
     </div>
 
-    <div v-if="form.mode === 'structured'" class="schema">
+    <div v-if="form.mode !== 'markdown'" class="schema">
       <div class="schema__head">
         <div>
           <span class="schema__title">{{ $t('pipeline.schema') }}</span>
@@ -173,7 +172,7 @@ onMounted(async () => {
       <p v-else class="dim" style="font-size: 13px">{{ $t('common.empty') }}</p>
     </div>
 
-    <div v-if="form.mode === 'structured'" class="schema" style="margin-top: 14px">
+    <div v-if="form.mode !== 'markdown'" class="schema" style="margin-top: 14px">
       <div class="schema__head" style="margin-bottom: 0">
         <div>
           <span class="schema__title">{{ $t('pipeline.dedup') }}</span>
@@ -190,20 +189,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="form.mode === 'structured'" class="schema" style="margin-top: 14px">
-      <div class="schema__head" style="margin-bottom: 0">
-        <div>
-          <span class="schema__title">{{ $t('pipeline.compact') }}</span>
-          <p class="schema__desc">{{ $t('pipeline.compactDesc') }}</p>
-        </div>
-        <label class="switch">
-          <input type="checkbox" v-model="form.compact.enabled" />
-          <span class="switch__track" />
-        </label>
-      </div>
-    </div>
-
-    <div v-if="form.mode === 'structured'" class="schema" style="margin-top: 14px">
+    <div class="schema" style="margin-top: 14px">
       <div class="schema__head" style="margin-bottom: 0">
         <div>
           <span class="schema__title">{{ $t('pipeline.rollingContext') }}</span>
