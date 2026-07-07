@@ -14,7 +14,7 @@ import {
 import { runStructured, runMarkdown } from '../llm/index.js';
 import { fetchImageAsBase64 } from '../llm/images.js';
 import { readAsBase64 } from '../media/store.js';
-import { sendMarkdownCard } from '../feishu/webhook.js';
+import { sendMarkdownCard, sendText } from '../feishu/webhook.js';
 import { createLogger } from '../util/logger.js';
 
 const log = createLogger('pipeline');
@@ -24,12 +24,22 @@ function renderTitle(template, count) {
   return String(template || '汇总').replace(/\{count\}/g, count);
 }
 
-// Extra fields forced into the schema when topic de-dup is on. The LLM must
-// attribute each item to its source group and give a stable topic key.
-const DEDUP_EXTRA_FIELDS = [
-  { key: 'group', label: '来源群名（从消息前缀 #群名 原样复制）', type: 'string', required: true, enum: [] },
-  { key: 'topic', label: '话题稳定标识：对同一件事必须给相同的英文短横线 key，如 maixcam-install-runtime-fail', type: 'string', required: true, enum: [] },
-];
+// Attribution fields injected into the schema so the LLM tags each item with
+// its source. `group`/`sender` power compact one-line alerts; `topic` powers
+// the per-group topic de-dup store.
+const GROUP_FIELD = { key: 'group', label: '来源群名（从消息前缀 #群名 原样复制）', type: 'string', required: true, enum: [] };
+const SENDER_FIELD = { key: 'sender', label: '发言人昵称（从消息中原样复制）', type: 'string', required: false, enum: [] };
+const TOPIC_FIELD = { key: 'topic', label: '话题稳定标识：对同一件事必须给相同的英文短横线 key，如 maixcam-install-runtime-fail', type: 'string', required: true, enum: [] };
+
+/** Merge attribution fields needed by dedup/compact, skipping keys already in the schema. */
+function buildExtraFields({ dedup, compact, schema }) {
+  const have = new Set((schema || []).map((f) => f.key));
+  const out = [];
+  const add = (f) => { if (!have.has(f.key) && !out.some((x) => x.key === f.key)) out.push(f); };
+  if (dedup) { add(GROUP_FIELD); add(TOPIC_FIELD); }
+  if (compact) { add(GROUP_FIELD); add(SENDER_FIELD); }
+  return out;
+}
 
 function slug(s) {
   return String(s || '')
@@ -49,14 +59,26 @@ function itemSignature(item, fields) {
   return crypto.createHash('sha1').update(payload).digest('hex').slice(0, 16);
 }
 
-/** One-line compact alert: [product] [Severity] [Category] (群名|群号):summary */
-function compactLine(item, displayGroup) {
+/** One-line compact alert: [product] [Severity] [Category] (sender@群名|群号):summary */
+function compactLine(item, displayGroup, sender) {
   const cap = (v) => (v ? String(v).charAt(0).toUpperCase() + String(v).slice(1) : v);
   const tag = (v) => (v ? `[${v}] ` : '');
   const head = `${tag(item.product)}${tag(cap(item.severity))}${tag(cap(item.category))}`.trim();
-  const loc = displayGroup ? `(${displayGroup})` : '';
+  const who = sender ? `${sender}@` : '';
+  const inner = `${who}${displayGroup || ''}`;
+  const loc = inner ? `(${inner})` : '';
   const summary = item.summary || item.quote || '';
   return `${head} ${loc}:${summary}`.trim();
+}
+
+/** Render structured items as compact one-liners (one per line). */
+export function itemsToCompact(items, cfg) {
+  return items
+    .map((it) => {
+      const { display } = resolveGroup(it.group, cfg.groups);
+      return compactLine(it, display, it.sender);
+    })
+    .join('\n');
 }
 
 /** Resolve an item's group field to a { id, display } using configured groups. */
@@ -109,9 +131,10 @@ export function itemsToMarkdown(items, fields) {
  *   - existing topic, content changed -> one-line compact alert
  *   - existing topic, unchanged       -> silenced
  * Updates the topic store (bump/insert + prune to keepTopics).
+ * @param {boolean} [compact] render fresh items as one-liners instead of a card block
  * @returns {{ fresh: Array, updated: Array, body: string }}
  */
-export function applyDedup(items, cfg) {
+export function applyDedup(items, cfg, compact = false) {
   const keep = Math.max(1, Number(cfg.pipeline.dedup?.keepTopics) || 5);
   const now = Math.floor(Date.now() / 1000);
   const fresh = [];
@@ -136,12 +159,15 @@ export function applyDedup(items, cfg) {
 
   const parts = [];
   if (fresh.length) {
-    parts.push(itemsToMarkdown(fresh.map((f) => f.it), cfg.pipeline.schema));
+    parts.push(compact
+      ? fresh.map((f) => compactLine(f.it, f.display, f.it.sender)).join('\n')
+      : itemsToMarkdown(fresh.map((f) => f.it), cfg.pipeline.schema));
   }
   if (updated.length) {
-    parts.push(`**话题更新（${updated.length}）**\n${updated.map((u) => compactLine(u.it, u.display)).join('\n')}`);
+    const head = compact ? `话题更新（${updated.length}）` : `**话题更新（${updated.length}）**`;
+    parts.push(`${head}\n${updated.map((u) => compactLine(u.it, u.display, u.it.sender)).join('\n')}`);
   }
-  return { fresh, updated, body: parts.join('\n\n---\n\n') };
+  return { fresh, updated, body: parts.join(compact ? '\n' : '\n\n---\n\n') };
 }
 
 /**
@@ -166,6 +192,20 @@ export async function runPipeline(cfg, windowStart, windowEnd, opts = {}) {
   }
 
   const transcript = messages.map(formatLine).join('\n');
+
+  // Rolling-context de-dup: feed the previous N windows' raw messages as
+  // read-only history so the LLM skips feedback it already reported. The window
+  // span is reused N times backwards from the current window start.
+  let history;
+  if (cfg.pipeline.rollingContext?.enabled) {
+    const runs = Math.max(1, Number(cfg.pipeline.rollingContext.runs) || 4);
+    const span = Math.max(1, windowEnd - windowStart);
+    const histMsgs = getMessagesInWindow(windowStart - runs * span, windowStart, groupIds);
+    if (histMsgs.length) {
+      history = histMsgs.map(formatLine).join('\n');
+      log.info(`Rolling context: ${histMsgs.length} prior message(s) from ${runs} window(s).`);
+    }
+  }
 
   // Collect images for vision (capped) as base64: prefer the locally-stored
   // copy, fall back to fetching the original URL. Handles both the new
@@ -195,6 +235,8 @@ export async function runPipeline(cfg, windowStart, windowEnd, opts = {}) {
     }
   }
 
+  const compact = cfg.pipeline.compact?.enabled;
+
   try {
     let resultText;
     let cardBody;
@@ -205,15 +247,16 @@ export async function runPipeline(cfg, windowStart, windowEnd, opts = {}) {
       const { items } = await runStructured(cfg.llm, {
         prompt: cfg.pipeline.prompt,
         transcript,
+        history,
         maxRetries: cfg.pipeline.maxRetries,
         images,
         fields: cfg.pipeline.schema,
-        extraFields: dedup ? DEDUP_EXTRA_FIELDS : undefined,
+        extraFields: buildExtraFields({ dedup, compact, schema: cfg.pipeline.schema }),
       });
       resultText = JSON.stringify(items, null, 2);
 
       if (dedup) {
-        const built = applyDedup(items, cfg);
+        const built = applyDedup(items, cfg, compact);
         if (!built.fresh.length && !built.updated.length) {
           insertDigest({ ...window, status: 'empty', result: resultText, pushed: 0, error: null });
           return { ...window, status: 'empty', items };
@@ -221,15 +264,15 @@ export async function runPipeline(cfg, windowStart, windowEnd, opts = {}) {
         cardBody = built.body;
         title = renderTitle(cfg.pipeline.cardTitle, built.fresh.length + built.updated.length);
       } else {
-        cardBody = itemsToMarkdown(items, cfg.pipeline.schema);
-        title = renderTitle(cfg.pipeline.cardTitle, items.length);
         if (!items.length) {
           insertDigest({ ...window, status: 'empty', result: resultText, pushed: 0, error: null });
           return { ...window, status: 'empty', items };
         }
+        cardBody = compact ? itemsToCompact(items, cfg) : itemsToMarkdown(items, cfg.pipeline.schema);
+        title = renderTitle(cfg.pipeline.cardTitle, items.length);
       }
     } else {
-      const md = await runMarkdown(cfg.llm, { prompt: cfg.pipeline.prompt, transcript, images });
+      const md = await runMarkdown(cfg.llm, { prompt: cfg.pipeline.prompt, transcript, history, images });
       resultText = md;
       cardBody = md;
       title = renderTitle(cfg.pipeline.cardTitle, messages.length);
@@ -237,7 +280,12 @@ export async function runPipeline(cfg, windowStart, windowEnd, opts = {}) {
 
     let pushed = 0;
     if (push && cfg.feishu.webhookUrl) {
-      await sendMarkdownCard(cfg.feishu, title, cardBody);
+      // Compact mode (structured only): plain text message instead of a card.
+      if (compact && cfg.pipeline.mode === 'structured') {
+        await sendText(cfg.feishu, `${title}\n${cardBody}`);
+      } else {
+        await sendMarkdownCard(cfg.feishu, title, cardBody);
+      }
       pushed = 1;
     }
 

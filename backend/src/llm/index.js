@@ -88,7 +88,7 @@ function extractJson(text) {
  *
  * @returns {Promise<{items: Array}>}
  */
-export async function runStructured(llmCfg, { prompt, transcript, maxRetries = 3, images, fields, extraFields }) {
+export async function runStructured(llmCfg, { prompt, transcript, maxRetries = 3, images, fields, extraFields, history }) {
   const base = Array.isArray(fields) && fields.length ? fields : DEFAULT_FIELDS;
   const activeFields = Array.isArray(extraFields) && extraFields.length
     ? [...base, ...extraFields]
@@ -104,8 +104,9 @@ export async function runStructured(llmCfg, { prompt, transcript, maxRetries = 3
     shapeText,
     '',
     '如果没有任何相关条目，返回 {"items": []}。',
+    ...historySection(history),
     '',
-    '=== 群聊消息 ===',
+    '=== 本次待分析消息 ===',
     transcript,
   ].join('\n');
 
@@ -137,16 +138,34 @@ export async function runStructured(llmCfg, { prompt, transcript, maxRetries = 3
  * Free-form markdown digest.
  * @returns {Promise<string>} markdown
  */
-export async function runMarkdown(llmCfg, { prompt, transcript, images }) {
+export async function runMarkdown(llmCfg, { prompt, transcript, images, history }) {
   const system = '你是产品社区运营助手，擅长把群聊内容整理成简洁的 Markdown 汇总报告。';
   const user = [
     prompt,
     '',
     '请输出一份结构清晰的 Markdown 汇总（含标题、分类、要点列表）。',
     images && images.length ? '附带的图片为群内截图，请结合图片内容一并分析。' : '',
+    ...historySection(history),
     '',
-    '=== 群聊消息 ===',
+    '=== 本次待分析消息 ===',
     transcript,
   ].join('\n');
   return chat(llmCfg, { system, user, images });
+}
+
+/**
+ * Rolling-context de-dup block: prior windows' raw messages fed as read-only
+ * context so the model skips feedback it already reported. Empty when no
+ * history — the caller's array is spread, so this contributes nothing.
+ */
+function historySection(history) {
+  if (!history) return [];
+  return [
+    '',
+    '=== 已在之前时段处理过的历史消息（仅供去重参考，切勿对这些历史内容单独生成条目）===',
+    history,
+    '',
+    '【去重要求】若某条反馈/问题在上述历史消息中已经出现过（同一产品的同一问题即视为重复），'
+      + '则不要再次报告，只从「本次待分析消息」中提取历史里尚未出现过的新内容。',
+  ];
 }

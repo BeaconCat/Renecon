@@ -73,6 +73,17 @@ function defaultConfig() {
         enabled: false,
         keepTopics: 5,
       },
+      // Compact mode (structured): push a plain text message (not a card), one
+      // line per item — [product] [Severity] [Category] (sender@群名|群号):summary.
+      compact: {
+        enabled: false,
+      },
+      // Rolling-context de-dup: feed the previous `runs` windows' raw messages
+      // to the LLM as read-only history so it skips already-reported feedback.
+      rollingContext: {
+        enabled: false,
+        runs: 4,
+      },
       // The task instruction fed to the LLM alongside the raw messages.
       prompt:
         '你是产品反馈分析助手。请从以下群聊消息中，找出所有关于 Sipeed 旗下产品'

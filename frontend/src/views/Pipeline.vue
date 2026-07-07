@@ -19,6 +19,8 @@ const form = reactive({
   prompt: '',
   schema: [],
   dedup: { enabled: false, keepTopics: 5 },
+  compact: { enabled: false },
+  rollingContext: { enabled: false, runs: 4 },
 });
 const runMinutes = ref(15);
 const running = ref(false);
@@ -63,6 +65,8 @@ onMounted(async () => {
   Object.assign(form, JSON.parse(JSON.stringify(cfg.config.pipeline)));
   if (!Array.isArray(form.schema)) form.schema = [];
   if (!form.dedup) form.dedup = { enabled: false, keepTopics: 5 };
+  if (!form.compact) form.compact = { enabled: false };
+  if (!form.rollingContext) form.rollingContext = { enabled: false, runs: 4 };
   runMinutes.value = form.intervalMinutes;
 });
 </script>
@@ -183,6 +187,36 @@ onMounted(async () => {
       <div v-if="form.dedup.enabled" class="field" style="max-width: 220px; margin-top: 14px">
         <label class="field__label">{{ $t('pipeline.keepTopics') }}</label>
         <input v-model.number="form.dedup.keepTopics" type="number" min="1" max="50" class="input" />
+      </div>
+    </div>
+
+    <div v-if="form.mode === 'structured'" class="schema" style="margin-top: 14px">
+      <div class="schema__head" style="margin-bottom: 0">
+        <div>
+          <span class="schema__title">{{ $t('pipeline.compact') }}</span>
+          <p class="schema__desc">{{ $t('pipeline.compactDesc') }}</p>
+        </div>
+        <label class="switch">
+          <input type="checkbox" v-model="form.compact.enabled" />
+          <span class="switch__track" />
+        </label>
+      </div>
+    </div>
+
+    <div v-if="form.mode === 'structured'" class="schema" style="margin-top: 14px">
+      <div class="schema__head" style="margin-bottom: 0">
+        <div>
+          <span class="schema__title">{{ $t('pipeline.rollingContext') }}</span>
+          <p class="schema__desc">{{ $t('pipeline.rollingContextDesc') }}</p>
+        </div>
+        <label class="switch">
+          <input type="checkbox" v-model="form.rollingContext.enabled" />
+          <span class="switch__track" />
+        </label>
+      </div>
+      <div v-if="form.rollingContext.enabled" class="field" style="max-width: 220px; margin-top: 14px">
+        <label class="field__label">{{ $t('pipeline.rollingRuns') }}</label>
+        <input v-model.number="form.rollingContext.runs" type="number" min="1" max="20" class="input" />
       </div>
     </div>
 
