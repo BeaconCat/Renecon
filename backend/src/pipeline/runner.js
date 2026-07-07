@@ -32,6 +32,15 @@ const GROUP_FIELD = { key: 'group', label: '来源群标识：原样复制该条
 const SENDER_FIELD = { key: 'sender', label: '发言人标识：原样复制该条消息中发言人的「昵称(QQ号)」，如 张三(10001)', type: 'string', required: false, enum: [] };
 const TOPIC_FIELD = { key: 'topic', label: '话题稳定标识：对同一件事必须给相同的英文短横线 key，如 maixcam-install-runtime-fail', type: 'string', required: true, enum: [] };
 
+// Compact mode extracts a fixed field set (no user-editable schema) — it feeds
+// the one-line alert directly. group/sender are added via buildExtraFields.
+const COMPACT_FIELDS = [
+  { key: 'product', label: '相关产品名', type: 'string', required: true, enum: [] },
+  { key: 'category', label: '分类', type: 'enum', required: true, enum: ['bug', 'feedback', 'suggestion', 'question', 'other'] },
+  { key: 'severity', label: '严重度', type: 'enum', required: false, enum: ['low', 'medium', 'high'] },
+  { key: 'summary', label: '一句话概括', type: 'string', required: true, enum: [] },
+];
+
 /** Merge attribution fields needed by dedup/compact, skipping keys already in the schema. */
 function buildExtraFields({ dedup, compact, schema }) {
   const out = [];
@@ -259,16 +268,18 @@ export async function runPipeline(cfg, windowStart, windowEnd, opts = {}) {
       cardBody = md;
       title = renderTitle(cfg.pipeline.cardTitle, messages.length);
     } else {
-      // structured (card) or compact (one-liners) — both extract structured items.
-      const dedup = cfg.pipeline.dedup?.enabled;
+      // structured (card, user schema) or compact (one-liners, fixed fields).
+      // Topic-DB dedup is a structured-only feature; compact dedups via rolling context.
+      const dedup = !compact && cfg.pipeline.dedup?.enabled;
+      const fields = compact ? COMPACT_FIELDS : cfg.pipeline.schema;
       const { items } = await runStructured(cfg.llm, {
         prompt: cfg.pipeline.prompt,
         transcript,
         history,
         maxRetries: cfg.pipeline.maxRetries,
         images,
-        fields: cfg.pipeline.schema,
-        extraFields: buildExtraFields({ dedup, compact, schema: cfg.pipeline.schema }),
+        fields,
+        extraFields: buildExtraFields({ dedup, compact, schema: fields }),
       });
       resultText = JSON.stringify(items, null, 2);
 

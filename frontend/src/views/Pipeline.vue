@@ -114,7 +114,7 @@ onMounted(async () => {
       <textarea v-model="form.prompt" class="textarea" rows="6" />
     </div>
 
-    <div v-if="form.mode !== 'markdown'" class="schema">
+    <div v-if="form.mode === 'structured'" class="schema">
       <div class="schema__head">
         <div>
           <span class="schema__title">{{ $t('pipeline.schema') }}</span>
@@ -172,7 +172,19 @@ onMounted(async () => {
       <p v-else class="dim" style="font-size: 13px">{{ $t('common.empty') }}</p>
     </div>
 
-    <div v-if="form.mode !== 'markdown'" class="schema" style="margin-top: 14px">
+    <div v-if="form.mode === 'compact'" class="schema" style="margin-top: 14px">
+      <div class="schema__head" style="margin-bottom: 12px">
+        <div>
+          <span class="schema__title">{{ $t('pipeline.compactPanel') }}</span>
+          <p class="schema__desc">{{ $t('pipeline.compactPanelDesc') }}</p>
+        </div>
+      </div>
+      <label class="field__label">{{ $t('pipeline.compactFormat') }}</label>
+      <pre class="compact-preview">[产品] [严重度] [分类] (发言人(QQ号)@群名|群号)：一句话概括</pre>
+      <p class="hint" style="margin-top: 8px">{{ $t('pipeline.compactFields') }}</p>
+    </div>
+
+    <div v-if="form.mode === 'structured'" class="schema" style="margin-top: 14px">
       <div class="schema__head" style="margin-bottom: 0">
         <div>
           <span class="schema__title">{{ $t('pipeline.dedup') }}</span>
@@ -240,4 +252,11 @@ onMounted(async () => {
 .switch--sm input:checked + .switch__track::before { transform: translateX(16px); }
 .dim { color: var(--text-faint); }
 .hint { margin: 6px 0 0; font-size: 11.5px; color: var(--text-faint); }
+.compact-preview {
+  margin: 6px 0 0; padding: 10px 12px;
+  background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono); font-size: 12.5px; color: var(--text);
+  white-space: pre-wrap; word-break: break-all; overflow-x: auto;
+}
 </style>
