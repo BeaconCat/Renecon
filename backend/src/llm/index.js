@@ -16,6 +16,16 @@ import { createLogger } from '../util/logger.js';
 
 const log = createLogger('llm');
 
+/** Sentinel the model emits (markdown mode) to cancel this send entirely. */
+export const CANCEL_MARKER = '__NO_PUSH__';
+
+/** True if a markdown digest is just the cancel sentinel (model opted out).
+ * Strips code fences / bold markers / whitespace but keeps '_' (in the marker). */
+export function isCancelled(text) {
+  const t = String(text || '').trim();
+  return t === '' || t.replace(/[`*\s]/g, '') === CANCEL_MARKER;
+}
+
 /** Fallback field set when no schema is configured. */
 const DEFAULT_FIELDS = [
   { key: 'product', label: '相关产品名', type: 'string', required: true, enum: [] },
@@ -103,7 +113,8 @@ export async function runStructured(llmCfg, { prompt, transcript, maxRetries = 3
     '请严格按以下 JSON 结构输出（不要包裹 markdown 代码块，不要额外文字）：',
     shapeText,
     '',
-    '如果没有任何相关条目，返回 {"items": []}。',
+    '如果没有任何相关条目（无相关消息，或全是与产品无关的闲聊/噪音），返回 {"items": []}，'
+      + '系统会据此取消本次推送。',
     ...historySection(history),
     '',
     '=== 本次待分析消息 ===',
@@ -144,6 +155,8 @@ export async function runMarkdown(llmCfg, { prompt, transcript, images, history 
     prompt,
     '',
     '请输出一份结构清晰的 Markdown 汇总（含标题、分类、要点列表）。',
+    `如果本时段没有任何值得汇报的有效内容（无相关消息、或全是与产品无关的闲聊/噪音），`
+      + `请只输出 ${CANCEL_MARKER} 这一行、不要输出任何其它内容，表示取消本次推送。`,
     images && images.length ? '附带的图片为群内截图，请结合图片内容一并分析。' : '',
     ...historySection(history),
     '',

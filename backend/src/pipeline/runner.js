@@ -11,7 +11,7 @@ import {
   getMessagesInWindow, insertDigest,
   findTopic, upsertTopic, pruneTopics,
 } from '../db/index.js';
-import { runStructured, runMarkdown } from '../llm/index.js';
+import { runStructured, runMarkdown, isCancelled } from '../llm/index.js';
 import { fetchImageAsBase64 } from '../llm/images.js';
 import { readAsBase64 } from '../media/store.js';
 import { sendMarkdownCard, sendText } from '../feishu/webhook.js';
@@ -264,6 +264,12 @@ export async function runPipeline(cfg, windowStart, windowEnd, opts = {}) {
 
     if (mode === 'markdown') {
       const md = await runMarkdown(cfg.llm, { prompt: cfg.pipeline.prompt, transcript, history, images });
+      // Model may opt out (no valid content) by emitting the cancel sentinel.
+      if (isCancelled(md)) {
+        log.info('Markdown digest cancelled by model (no push).');
+        insertDigest({ ...window, status: 'empty', result: md, pushed: 0, error: null });
+        return { ...window, status: 'empty' };
+      }
       resultText = md;
       cardBody = md;
       title = renderTitle(cfg.pipeline.cardTitle, messages.length);
